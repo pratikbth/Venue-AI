@@ -1,3 +1,10 @@
+
+# Fairmount-x-Loversai
+
+**A full-stack AI-powered event and wedding design platform.**
+
+**Important:** This project is private and not licensed for use, copying, modification, or distribution.
+
 # Fairmont x LoversAI - Complete Project Memory
 
 > **Last Updated**: April 2026  
@@ -635,4 +642,5 @@ uvicorn server:app --reload
 
 ---
 
-*End of Project Memory*
+*End of Project Memory*#   F a i r m o u n t - l o v e r s A I  
+ 
