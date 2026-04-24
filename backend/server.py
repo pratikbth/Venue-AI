@@ -17,6 +17,14 @@ import httpx  # For calling external APIs like Flux
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env', override=True)
 
+
+def get_cors_origins() -> list[str]:
+    raw_origins = os.environ.get("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+    origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+    if "*" in origins:
+        return ["http://localhost:3000", "http://127.0.0.1:3000"]
+    return origins or ["http://localhost:3000", "http://127.0.0.1:3000"]
+
 # Setup logging FIRST (before any logging calls)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -47,6 +55,8 @@ class GenerateRequest(BaseModel):
     reference_image: Optional[str] = None  # base64 - Legacy support (treated as design_image)
     venue_image_url: Optional[str] = None
     design_image_url: Optional[str] = None
+    high_quality: Optional[bool] = None
+    variant_count: Optional[int] = None
 
 class MoodboardImage(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -258,37 +268,51 @@ async def fetch_image_as_base64(url: str) -> Optional[str]:
 
 
 def build_prompt(req: GenerateRequest) -> str:
-    parts = [req.prompt]
+    base_prompt = (req.prompt or "").strip()
+    parts = [f"Client request: {base_prompt}" if base_prompt else "Client request: design the venue decor."]
     if req.function_type:
         parts.append(f"Event type: {req.function_type}")
     if req.theme:
         parts.append(f"Theme: {req.theme}")
     if req.space:
         parts.append(f"Venue space: {req.space} at Fairmont Mumbai")
-    return ". ".join(parts)
+    parts.extend([
+        "Output goal: one photorealistic transformed venue image suitable for client presentation.",
+        "Hard constraints: preserve architecture, camera angle, and structural geometry.",
+        "Decor policy: additive decor only; do not alter walls, floor, ceiling, pillars, doors, or windows.",
+        "Scene policy: no people, no text overlays, no logos, no watermarks.",
+    ])
+    return "\n".join(parts)
 
 
 def build_flux_prompt(user_prompt: str, mode: str) -> str:
     mode_instruction = (
-        "MODE A (element placement): Place selected decor elements while preserving all venue structure."
+        "MODE A: place only the requested decor elements while preserving all venue structure."
         if mode == "A"
-        else "MODE B (full decoration): Decorate the whole venue in the reference style while preserving architecture."
+        else "MODE B: fully decorate the venue in the reference style while preserving architecture."
     )
-    return f"""{SYSTEM_PROMPT}
+    return f"""You are a photorealistic wedding decor compositor.
 
-MODE DETECTION:
 {mode_instruction}
 
-USER REQUEST:
-{user_prompt}
+Input semantics:
+- Image 1 is the real venue to preserve.
+- Image 2 is the style reference to transfer.
 
-IMPORTANT INSTRUCTIONS:
-- The first image is the venue space to transform; keep all structural elements intact.
-- The second image is a design style reference; transfer its mood and aesthetics.
-- Do not change walls, floor, ceiling, windows, pillars, or room layout.
-- Apply decor elements (florals, drapery, lighting, furniture) onto venue architecture.
-- Maintain photorealistic event-photography quality with correct perspective and lighting.
-- Output one final transformed venue image.
+Generation requirements:
+- Keep venue architecture, perspective, lens feel, and room proportions intact.
+- Add decor with realistic scale, depth, shadows, reflections, and occlusion.
+- Use premium wedding materials and cohesive styling (florals, fabric, lighting, tablescape).
+- Maintain visual plausibility for walkways and seating clearances.
+- Keep color harmony consistent with the requested theme.
+
+Do not:
+- Change walls/floor/ceiling/pillars/windows/doors geometry.
+- Add people, signage text, logos, or watermarks.
+- Produce cartoonish, painterly, or low-detail output.
+
+User requirements:
+{user_prompt}
 """
 
 
@@ -539,6 +563,232 @@ def resolve_result_image_url(data: dict) -> Optional[str]:
 
     return None
 
+
+def guess_mime_from_binary(data: bytes) -> str:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith(b"RIFF") and b"WEBP" in data[:16]:
+        return "image/webp"
+    return "image/png"
+
+
+def build_nano_banana_contents(prompt: str, venue_image: Optional[str], design_image: Optional[str]) -> list:
+    parts = [{"text": prompt}]
+    if venue_image:
+        parts.append({"inlineData": {"mimeType": guess_mime_from_base64(venue_image), "data": venue_image}})
+    if design_image:
+        parts.append({"inlineData": {"mimeType": guess_mime_from_base64(design_image), "data": design_image}})
+    return [{"role": "user", "parts": parts}]
+
+
+def extract_nano_banana_image_and_text(data: dict) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Returns (image_base64, mime_type, text_message)."""
+    if not isinstance(data, dict):
+        return None, None, None
+
+    candidates = data.get("candidates") or []
+    text_fragments = []
+    for candidate in candidates:
+        content = (candidate or {}).get("content") or {}
+        for part in content.get("parts") or []:
+            if isinstance(part, dict):
+                inline = part.get("inlineData") or part.get("inline_data")
+                if isinstance(inline, dict) and inline.get("data"):
+                    return inline.get("data"), inline.get("mimeType") or inline.get("mime_type") or "image/png", None
+                if part.get("text"):
+                    text_fragments.append(str(part.get("text")))
+
+    return None, None, "\n".join(text_fragments).strip() or None
+
+
+async def generate_with_nano_banana(
+    prompt: str,
+    api_key: str,
+    model: str,
+    venue_image: Optional[str],
+    design_image: Optional[str],
+) -> dict:
+    payload = {
+        "contents": build_nano_banana_contents(prompt, venue_image, design_image),
+        "generationConfig": {
+            "responseModalities": ["TEXT", "IMAGE"],
+        },
+    }
+
+    candidate_models = [
+        model,
+        "nano-banana-pro-preview",
+        "gemini-2.5-flash-image",
+        "gemini-3-pro-image-preview",
+        "gemini-3.1-flash-image-preview",
+    ]
+
+    # Preserve order while removing duplicates.
+    seen = set()
+    models_to_try = []
+    for candidate in candidate_models:
+        c = (candidate or "").strip()
+        if c and c not in seen:
+            seen.add(c)
+            models_to_try.append(c)
+
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        for idx, model_name in enumerate(models_to_try):
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+            response = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
+            body_text = response.text.strip()
+
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                except Exception:
+                    return {
+                        "success": False,
+                        "error": "Nano Banana invalid response",
+                        "description": body_text[:1000],
+                    }
+
+                image_b64, mime_type, text_message = extract_nano_banana_image_and_text(data)
+                if not image_b64:
+                    return {
+                        "success": False,
+                        "error": "Nano Banana returned no image",
+                        "description": text_message or body_text[:1000] or "No image found in response",
+                    }
+
+                return {
+                    "success": True,
+                    "image_data": image_b64,
+                    "mime_type": mime_type or "image/png",
+                    "description": "Design generated successfully",
+                    "provider": "nano_banana",
+                    "model": model_name,
+                }
+
+            has_next_model = idx < len(models_to_try) - 1
+            not_found_model = response.status_code == 404 and "not found" in body_text.lower()
+            transient_error = response.status_code in {429, 500, 502, 503, 504}
+            should_retry = has_next_model and (not_found_model or transient_error)
+            if should_retry:
+                logger.warning(
+                    f"Nano Banana model attempt failed ({model_name}), retrying with next model. "
+                    f"Status={response.status_code}, body={body_text[:300]}"
+                )
+                continue
+
+            logger.error(f"Nano Banana API error {response.status_code}: {body_text[:1000]}")
+            return {
+                "success": False,
+                "error": f"Nano Banana API error: {response.status_code}",
+                "description": body_text[:1000] or "Request failed",
+            }
+
+    return {
+        "success": False,
+        "error": "Nano Banana model resolution failed",
+        "description": "No compatible Nano Banana model could be used.",
+    }
+
+
+async def generate_flux_variant_from_payload(
+    target_url: str,
+    api_payload: dict,
+    flux_api_key: str,
+    max_attempts: int = 100,
+) -> dict:
+    """Generate a single FLUX image variant from a prepared payload."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            target_url,
+            json=api_payload,
+            headers={
+                "x-key": flux_api_key,
+                "Content-Type": "application/json",
+            },
+        )
+
+    if response.status_code not in [200, 201, 202]:
+        body = response.text.strip()
+        return {
+            "success": False,
+            "error": f"Variant submit failed: {response.status_code}",
+            "description": body[:500] if body else "Submit failed",
+        }
+
+    try:
+        data = response.json()
+    except Exception:
+        return {
+            "success": False,
+            "error": "Variant submit invalid response",
+            "description": response.text[:500],
+        }
+
+    task_id = data.get("id", "")
+    polling_url = data.get("polling_url", f"https://api.bfl.ai/v1/get_result?id={task_id}")
+    result_url = resolve_result_image_url(data)
+
+    if not result_url and not task_id:
+        return {
+            "success": False,
+            "error": "Variant missing task ID or image URL",
+            "description": "Flux response did not include polling info",
+        }
+
+    if not result_url:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            for _ in range(max_attempts):
+                await asyncio.sleep(3)
+                poll_response = await client.get(
+                    polling_url,
+                    headers={"x-key": flux_api_key, "Content-Type": "application/json"},
+                )
+                if poll_response.status_code != 200:
+                    continue
+                poll_data = poll_response.json()
+                status = str(poll_data.get("status", "unknown")).lower()
+                if status in ["ready", "succeeded", "complete", "completed"]:
+                    result_url = resolve_result_image_url(poll_data)
+                    if result_url:
+                        break
+                    return {
+                        "success": False,
+                        "error": "Variant result missing image",
+                        "description": str(poll_data)[:200],
+                    }
+                if status in ["error", "failed", "content moderated", "request moderated"]:
+                    return {
+                        "success": False,
+                        "error": "Variant generation failed",
+                        "description": str(poll_data)[:200],
+                    }
+
+    if not result_url:
+        return {
+            "success": False,
+            "error": "Variant timeout",
+            "description": "Variant generation timed out",
+        }
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        img_response = await client.get(result_url)
+    if img_response.status_code != 200:
+        return {
+            "success": False,
+            "error": "Variant download failed",
+            "description": f"Status: {img_response.status_code}",
+        }
+
+    img_base64 = base64.b64encode(img_response.content).decode("utf-8")
+    return {
+        "success": True,
+        "image_data": img_base64,
+        "mime_type": "image/png",
+        "task_id": task_id,
+    }
+
 @api_router.get("/")
 async def root():
     return {"message": "Fairmont x LoversAI API"}
@@ -570,6 +820,8 @@ async def generate_image(req: GenerateRequest):
         
         has_venue = bool(venue_image)
         has_design = bool(design_image)
+        requested_variants = req.variant_count if req.variant_count is not None else (3 if req.high_quality else 1)
+        variant_count = max(1, min(3, int(requested_variants or 1)))
         requested_input_mode = "dual_image" if (has_venue and has_design) else ("venue_only" if has_venue else "design_only" if has_design else "text_only")
         effective_input_mode = requested_input_mode
         prompt_source = "rule_based"
@@ -584,7 +836,81 @@ async def generate_image(req: GenerateRequest):
         logger.info(f"reference_image provided: {bool(req.reference_image)}, length: {len(req.reference_image) if req.reference_image else 0}")
         logger.info(f"venue_image_url provided: {bool(req.venue_image_url)}")
         logger.info(f"design_image_url provided: {bool(req.design_image_url)}")
+        logger.info(f"variant_count requested: {variant_count}")
         
+        # =========================================================
+        # Provider selection
+        # Prefer Nano Banana (Gemini image generation) when configured.
+        # =========================================================
+
+        nano_banana_api_key = (
+            strip_env(os.environ.get("NANO_BANANA_API_KEY", ""))
+            or strip_env(os.environ.get("GEMINI_API_KEY", ""))
+        )
+        nano_banana_model = os.environ.get("NANO_BANANA_MODEL", "nano-banana-pro-preview")
+
+        # Backward-compatible convenience: if FLUX key is a Gemini-style key, use it for Nano Banana.
+        flux_key_for_detection = strip_env(os.environ.get("FLUX_API_KEY", ""))
+        if not nano_banana_api_key and flux_key_for_detection.startswith("AIza"):
+            nano_banana_api_key = flux_key_for_detection
+
+        use_nano_banana = bool(nano_banana_api_key) and (has_venue or has_design)
+        if use_nano_banana:
+            nano_tasks = [
+                generate_with_nano_banana(
+                    prompt=flux_prompt,
+                    api_key=nano_banana_api_key,
+                    model=nano_banana_model,
+                    venue_image=venue_image,
+                    design_image=design_image,
+                )
+                for _ in range(variant_count)
+            ]
+            nano_results = await asyncio.gather(*nano_tasks)
+            nano_variants = []
+            nano_failure = None
+            fallback_to_flux = False
+
+            for nano_result in nano_results:
+                if nano_result.get("success"):
+                    nano_variants.append({
+                        "image_data": nano_result.get("image_data"),
+                        "mime_type": nano_result.get("mime_type", "image/png"),
+                        "provider": "nano_banana",
+                        "model": nano_result.get("model", nano_banana_model),
+                    })
+                    continue
+
+                nano_failure = nano_result
+                nano_error = str(nano_result.get("error", ""))
+                nano_description = str(nano_result.get("description", ""))
+                fallback_to_flux = fallback_to_flux or (
+                    nano_error == "Nano Banana returned no image"
+                    and ("provide the images" in nano_description.lower() or "provide images" in nano_description.lower())
+                )
+
+            if nano_variants:
+                primary = nano_variants[0]
+                return {
+                    "success": True,
+                    "image_data": primary.get("image_data"),
+                    "mime_type": primary.get("mime_type", "image/png"),
+                    "description": "Design generated successfully",
+                    "provider": "nano_banana",
+                    "model": primary.get("model", nano_banana_model),
+                    "input_mode": requested_input_mode,
+                    "effective_input_mode": requested_input_mode,
+                    "mode": "element" if mode == "A" else "full_decoration",
+                    "prompt_source": "nano_banana",
+                    "prompt_words": len(flux_prompt.split()),
+                    "variants": nano_variants,
+                    "variants_requested": variant_count,
+                    "variants_generated": len(nano_variants),
+                }
+            if not fallback_to_flux:
+                logger.warning(f"Nano Banana path failed: {str((nano_failure or {}).get('description', ''))[:200]}")
+                return nano_failure or {"success": False, "error": "Nano Banana failed", "description": "No successful variant"}
+
         # =========================================================
         # FLUX API INTEGRATION - Black Forest Labs
         # Model: flux-kontext-pro (image editing model)
@@ -641,8 +967,8 @@ async def generate_image(req: GenerateRequest):
         if is_text_endpoint:
             api_payload = {
                 "prompt": flux_prompt,
-                "width": 1440,
-                "height": 960,
+                "width": 1024,
+                "height": 768,
                 "output_format": "png",
                 "safety_tolerance": 2,
             }
@@ -682,12 +1008,15 @@ async def generate_image(req: GenerateRequest):
             )
             
             logger.info(f"FLUX API status: {response.status_code}")
+            response_text = response.text.strip()
+            if response_text:
+                logger.info(f"FLUX API response body: {response_text[:1000]}")
             
             # Handle error responses
             if response.status_code == 401:
-                return {"success": False, "error": "Invalid API key", "description": "Check FLUX_API_KEY in .env"}
+                return {"success": False, "error": "Invalid API key", "description": response_text or "Check FLUX_API_KEY in .env"}
             elif response.status_code == 402:
-                return {"success": False, "error": "Insufficient credits", "description": "Top up your BFL account"}
+                return {"success": False, "error": "Insufficient credits", "description": response_text or "Top up your BFL account"}
             elif response.status_code == 422:
                 # Fallback 1: retry without image_prompt when dual-image input fails validation.
                 if not is_text_endpoint and "image_prompt" in api_payload:
@@ -702,6 +1031,9 @@ async def generate_image(req: GenerateRequest):
                             "Content-Type": "application/json"
                         }
                     )
+                    response_text = response.text.strip()
+                    if response_text:
+                        logger.info(f"FLUX fallback response body: {response_text[:1000]}")
                     if response.status_code in [200, 201, 202]:
                         api_payload = fallback_payload
                     logger.info(f"Fallback status: {response.status_code}")
@@ -724,6 +1056,9 @@ async def generate_image(req: GenerateRequest):
                             "Content-Type": "application/json"
                         }
                     )
+                    response_text = response.text.strip()
+                    if response_text:
+                        logger.info(f"FLUX text fallback response body: {response_text[:1000]}")
                     if response.status_code in [200, 201, 202]:
                         target_url = flux_text_api_url
                         is_text_endpoint = True
@@ -731,9 +1066,9 @@ async def generate_image(req: GenerateRequest):
                         api_payload = text_payload
                     logger.info(f"Text fallback status: {response.status_code}")
             elif response.status_code == 429:
-                return {"success": False, "error": "Rate limited", "description": "Wait and try again"}
+                return {"success": False, "error": "Rate limited", "description": response_text or "Wait and try again"}
             elif response.status_code not in [200, 201, 202]:
-                return {"success": False, "error": f"API error: {response.status_code}", "description": response.text[:200]}
+                return {"success": False, "error": f"API error: {response.status_code}", "description": response_text[:1000] or response.text[:200]}
             
             # Get task ID and polling URL from response
             data = response.json()
@@ -742,6 +1077,19 @@ async def generate_image(req: GenerateRequest):
             result_url = resolve_result_image_url(data)
             
             logger.info(f"Task ID: {task_id}, Polling for result...")
+
+            extra_variant_tasks = []
+            if variant_count > 1:
+                extra_variant_tasks = [
+                    asyncio.create_task(
+                        generate_flux_variant_from_payload(
+                            target_url=target_url,
+                            api_payload=api_payload,
+                            flux_api_key=flux_api_key,
+                        )
+                    )
+                    for _ in range(variant_count - 1)
+                ]
         
         # =========================================================
         # POLL FOR RESULT (async polling)
@@ -800,10 +1148,30 @@ async def generate_image(req: GenerateRequest):
             
             # Convert to base64
             img_base64 = base64.b64encode(img_response.content).decode("utf-8")
+            variants = [{"image_data": img_base64, "mime_type": "image/png", "task_id": task_id}]
+
+            if variant_count > 1 and extra_variant_tasks:
+                done_tasks, pending_tasks = await asyncio.wait(extra_variant_tasks, timeout=5.0)
+                for pending_task in pending_tasks:
+                    pending_task.cancel()
+                for completed_task in done_tasks:
+                    try:
+                        extra = completed_task.result()
+                    except Exception as extra_error:
+                        logger.warning(f"Variant generation task raised: {extra_error}")
+                        continue
+                    if extra.get("success"):
+                        variants.append({
+                            "image_data": extra.get("image_data"),
+                            "mime_type": extra.get("mime_type", "image/png"),
+                            "task_id": extra.get("task_id", ""),
+                        })
+                    else:
+                        logger.warning(f"Variant generation attempt failed: {extra.get('description', '')[:200]}")
             
             return {
                 "success": True,
-                "image_data": img_base64,
+                "image_data": variants[0]["image_data"],
                 "mime_type": "image/png",
                 "description": "Design generated successfully",
                 "input_mode": requested_input_mode,
@@ -814,6 +1182,9 @@ async def generate_image(req: GenerateRequest):
                 "prompt_source": prompt_source,
                 "prompt_words": len(flux_prompt.split()),
                 "groq_analysis_excerpt": groq_analysis_excerpt,
+                "variants": variants,
+                "variants_requested": variant_count,
+                "variants_generated": len(variants),
             }
         
     except httpx.TimeoutException:
@@ -983,7 +1354,7 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=get_cors_origins(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
