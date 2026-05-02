@@ -36,9 +36,12 @@ export default function Canvas({ filters, referenceImage, venueImage, selectedAn
   const [isGenerating, setIsGenerating] = useState(false);
   const [progressText, setProgressText] = useState("");
   const [highQualityMode, setHighQualityMode] = useState(false);
+  const [selectedService, setSelectedService] = useState(null);
+  const [serviceImage, setServiceImage] = useState(null);
+  const [showServiceView, setShowServiceView] = useState(false);
   const [error, setError] = useState(null);
 
-  const currentImage = generatedVariants[selectedVariantIndex] || generatedImage;
+  const currentImage = showServiceView && serviceImage ? serviceImage : (generatedVariants[selectedVariantIndex] || generatedImage);
 
   const handleGenerate = async () => {
     if (!prompt.trim() || isGenerating) return;
@@ -119,6 +122,54 @@ export default function Canvas({ filters, referenceImage, venueImage, selectedAn
       setGeneratedVariants(collected.slice(0, targetVariants));
       setSelectedVariantIndex(0);
       setGeneratedImage(collected[0]);
+
+      // If Services is enabled, request a second image by appending the service-mode brief
+      if (selectedService) {
+        try {
+          setProgressText("Generating services overlay...");
+
+          const servicesAppendText = `The same event venue is now in full service mode, inspired by the luxury hospitality standards of Fairmont Hotels. Add the following service elements to the existing decor scene:
+
+- Professional waiters in crisp white shirts, black waistcoats, and bow ties moving between elegantly decorated tables carrying silver service trays
+- White-gloved butler staff presenting plated fine dining dishes to seated guests
+- A polished champagne and cocktail service station with a uniformed bartender arranging crystal glasses
+- Neatly dressed catering staff in the background managing food stations with silver chafing dishes and floral garnishes
+- Soft warm candlelight and chandeliers reflecting off polished silverware and white linen tablecloths
+- Guests in formal evening wear being attended to at their seats
+- The entire original event decor — floral arrangements, lighting, stage, color theme — remains fully visible and unchanged in the background
+
+Style: Luxury event photography, photorealistic, 4K, warm golden ambient lighting, shot from a wide angle to capture both the decor and the full service experience. Inspired by the grandeur and white-glove service aesthetic of Fairmont Mumbai.`;
+
+          const servicePrompt = `${fullPrompt}\n\n${servicesAppendText}`;
+
+          const servicePayload = {
+            prompt: servicePrompt,
+            function_type: filters.function_type || null,
+            space: filters.space || null,
+            // Use the generated image as venue input to preserve original decor composition
+            venue_image: collected[0],
+            design_image: designImageBase64 || null,
+            venue_image_url: null,
+            design_image_url: designImageUrl,
+            reference_image: referenceImage?.data || null,
+            high_quality: false,
+            variant_count: 1,
+          };
+
+          const svcRes = await axios.post(`${API}/generate`, servicePayload);
+          if (svcRes.data && svcRes.data.success) {
+            const svcImg = svcRes.data.image_data || (Array.isArray(svcRes.data.variants) && svcRes.data.variants[0] && svcRes.data.variants[0].image_data) || null;
+            if (svcImg) {
+              setServiceImage(svcImg);
+              setShowServiceView(true);
+            }
+          }
+        } catch (svcErr) {
+          console.warn("Service overlay generation failed:", svcErr?.message || svcErr);
+        } finally {
+          setProgressText("");
+        }
+      }
     } catch (err) {
       setError(err?.response?.data?.detail || err?.message || "Something went wrong");
     } finally {
@@ -178,9 +229,21 @@ export default function Canvas({ filters, referenceImage, venueImage, selectedAn
         >
           {highQualityMode ? "High Quality x3" : "Standard x1"}
         </button>
+
+        {/* Services selector button */}
+        <div className="relative">
+          <button
+            onClick={() => setSelectedService((prev) => (prev ? null : "Services"))}
+            disabled={isGenerating}
+            className={`glass-button rounded-full px-3 py-1 text-xs uppercase tracking-wider ${selectedService ? "glass-pill-active" : ""}`}
+            data-testid="toggle-services"
+          >
+            Services
+          </button>
+        </div>
       </div>
 
-      {(filters.function_type || filters.space || selectedAngle || referenceImage || venueImage) && (
+      {(filters.function_type || filters.space || selectedAngle || referenceImage || venueImage || selectedService) && (
         <div className="flex items-center gap-2 flex-wrap px-1">
           <span className="text-white/40 text-xs" style={{ fontFamily: "var(--font-body)" }}>
             Active:
@@ -197,6 +260,9 @@ export default function Canvas({ filters, referenceImage, venueImage, selectedAn
             <span className="glass-pill-active rounded-full px-3 py-1 text-xs flex items-center gap-1">
               <ImageIcon className="w-3 h-3" strokeWidth={1.5} /> Ref
             </span>
+          )}
+          {selectedService && (
+            <span className="glass-pill-active rounded-full px-3 py-1 text-xs">{selectedService}</span>
           )}
         </div>
       )}
@@ -260,6 +326,16 @@ export default function Canvas({ filters, referenceImage, venueImage, selectedAn
                 <Plus className="w-4 h-4" strokeWidth={1.5} />
                 Add
               </button>
+              {serviceImage && (
+                <button
+                  onClick={() => setShowServiceView((v) => !v)}
+                  className="glass-button rounded-full px-4 py-3 flex items-center gap-2 text-sm uppercase tracking-wider"
+                  style={{ fontFamily: "var(--font-body)", fontWeight: 400 }}
+                  data-testid="toggle-service-view"
+                >
+                  {showServiceView ? "Main View" : "Services View"}
+                </button>
+              )}
               <button
                 onClick={handleDownload}
                 className="glass-button rounded-full px-6 py-3 flex items-center gap-2 text-sm uppercase tracking-wider"
