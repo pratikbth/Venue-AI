@@ -69,10 +69,6 @@ const EVENT_OPTIONS = [
   { name: "Ultra-Luxury Wedding", desc: "Opulent destination wedding with international luxury standards", thumbnail: "/Assets/Ultra-Luxury.jpg" },
   { name: "Small Function", desc: "For small parties like birthdays, result announcements, or success celebrations", thumbnail: "/Assets/Product-Launch.jpg" },
   { name: "Corporate Conference", desc: "Professional business event with modern staging and technology", thumbnail: "/Assets/Corparate.jpg" },
-  { name: "Global Exhibition", desc: "International trade show or product showcase", thumbnail: "/Assets/Gloabal-Exhibiton.jpg" },
-  { name: "Fashion Show", desc: "High-fashion runway event with dramatic staging", thumbnail: "/Assets/Fashion-Show.jpg" },
-  { name: "Product Launch", desc: "Premium brand product unveiling event", thumbnail: "/Assets/Product-Launch.jpg" },
-  { name: "Cultural Festival", desc: "Vibrant cultural celebration with diverse elements", thumbnail: "/Assets/Cultural-Festival.jpg" },
 ];
 
 export { SPACE_OPTIONS, EVENT_OPTIONS };
