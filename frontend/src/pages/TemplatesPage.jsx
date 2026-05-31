@@ -38,15 +38,17 @@ export default function TemplatesPage() {
 
   return (
     <div className="relative min-h-screen text-white" data-testid="templates-page">
-      {/* Fixed Background */}
-      <div
-        className="fixed inset-0 z-0"
-        style={{
-          backgroundImage: `url(${BG_IMAGE})`,
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-        }}
-      >
+      {/* Fixed Background Video */}
+      <div className="fixed inset-0 z-0 overflow-hidden">
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          className="absolute min-w-full min-h-full object-cover"
+        >
+          <source src="/Assets/background_video.mp4" type="video/mp4" />
+        </video>
         <div
           className="absolute inset-0"
           style={{

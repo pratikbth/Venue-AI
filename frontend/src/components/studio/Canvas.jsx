@@ -28,7 +28,7 @@ const urlToBase64 = async (url) => {
   }
 };
 
-export default function Canvas({ filters, referenceImage, venueImage, selectedAngle, onAddToMoodboard }) {
+export default function Canvas({ filters, referenceImage, venueImage, onAddToMoodboard }) {
   const [prompt, setPrompt] = useState("");
   const [generatedImage, setGeneratedImage] = useState(null);
   const [generatedVariants, setGeneratedVariants] = useState([]);
@@ -55,12 +55,13 @@ export default function Canvas({ filters, referenceImage, venueImage, selectedAn
 
     try {
       let fullPrompt = prompt.trim();
-      if (selectedAngle) {
-        fullPrompt += `. Perspective: ${selectedAngle.angle} of ${selectedAngle.space}`;
-      }
 
       let venueImageBase64 = null;
-      if (venueImage) {
+      if (venueImage?.data) {
+        venueImageBase64 = venueImage.data;
+      } else if (venueImage?.preview) {
+        venueImageBase64 = await urlToBase64(venueImage.preview);
+      } else if (typeof venueImage === "string") {
         venueImageBase64 = await urlToBase64(venueImage);
       }
 
@@ -74,16 +75,19 @@ export default function Canvas({ filters, referenceImage, venueImage, selectedAn
       }
 
       const designImageUrl = referenceImage?.thumbnailUrl || referenceImage?.preview || null;
-      const hasVenueInput = !!venueImageBase64 || !!venueImage;
+      const venueImageUrl = venueImage?.preview || (typeof venueImage === "string" ? venueImage : null);
+      const hasVenueInput = !!venueImageBase64 || !!venueImageUrl;
       const hasDesignInput = !!designImageBase64 || !!designImageUrl;
 
       if (!hasVenueInput) {
-        setError("Venue image missing. Please select a space and angle first.");
+        setError("Space reference missing. Please upload a space reference image first.");
+        setIsGenerating(false);
         return;
       }
 
       if (!hasDesignInput) {
         setError("Design reference missing. Please upload/select a reference image.");
+        setIsGenerating(false);
         return;
       }
 
@@ -93,10 +97,10 @@ export default function Canvas({ filters, referenceImage, venueImage, selectedAn
       const payload = {
         prompt: fullPrompt,
         function_type: filters.function_type || null,
-        space: filters.space || null,
+        space: null,
         venue_image: venueImageBase64,
         design_image: designImageBase64,
-        venue_image_url: venueImage || null,
+        venue_image_url: venueImageUrl,
         design_image_url: designImageUrl,
         reference_image: referenceImage?.data || null,
         high_quality: highQualityMode,
@@ -145,7 +149,7 @@ Style: Luxury event photography, photorealistic, 4K, warm golden ambient lightin
           const servicePayload = {
             prompt: servicePrompt,
             function_type: filters.function_type || null,
-            space: filters.space || null,
+            space: null,
             // Use the generated image as venue input to preserve original decor composition
             venue_image: collected[0],
             design_image: designImageBase64 || null,
@@ -243,22 +247,20 @@ Style: Luxury event photography, photorealistic, 4K, warm golden ambient lightin
         </div>
       </div>
 
-      {(filters.function_type || filters.space || selectedAngle || referenceImage || venueImage || selectedService) && (
+      {(filters.function_type || referenceImage || venueImage || selectedService) && (
         <div className="flex items-center gap-2 flex-wrap px-1">
           <span className="text-white/40 text-xs" style={{ fontFamily: "var(--font-body)" }}>
             Active:
           </span>
           {filters.function_type && <span className="glass-pill-active rounded-full px-3 py-1 text-xs">{filters.function_type}</span>}
-          {filters.space && <span className="glass-pill-active rounded-full px-3 py-1 text-xs">{filters.space}</span>}
-          {selectedAngle && <span className="glass-pill-active rounded-full px-3 py-1 text-xs">{selectedAngle.angle}</span>}
           {venueImage && (
             <span className="glass-pill-active rounded-full px-3 py-1 text-xs flex items-center gap-1">
-              <ImageIcon className="w-3 h-3" strokeWidth={1.5} /> Venue
+              <ImageIcon className="w-3.5 h-3.5" strokeWidth={1.5} /> Space Ref
             </span>
           )}
-          {referenceImage && !venueImage && (
+          {referenceImage && (
             <span className="glass-pill-active rounded-full px-3 py-1 text-xs flex items-center gap-1">
-              <ImageIcon className="w-3 h-3" strokeWidth={1.5} /> Ref
+              <ImageIcon className="w-3.5 h-3.5" strokeWidth={1.5} /> Design Ref
             </span>
           )}
           {selectedService && (

@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeft, FileText, LayoutGrid, ConciergeBell } from "lucide-react";
 import Sidebar from "@/components/studio/Sidebar";
 import Canvas from "@/components/studio/Canvas";
-import AngleModal from "@/components/studio/AngleModal";
 import TemplateRefModal from "@/components/studio/TemplateRefModal";
 import MoodboardModal from "@/components/studio/MoodboardModal";
 
@@ -13,26 +12,14 @@ export default function StudioPage() {
   const navigate = useNavigate();
   const [filters, setFilters] = useState({
     function_type: null,
-    space: null,
   });
   const [referenceImage, setReferenceImage] = useState(null);
+  const [venueImage, setVenueImage] = useState(null);
   const [sessionId] = useState(() => crypto.randomUUID());
-  const [angleModalSpace, setAngleModalSpace] = useState(null);
-  const [selectedAngle, setSelectedAngle] = useState(null);
   const [hoveredItem, setHoveredItem] = useState(null);
   const [showTemplateRef, setShowTemplateRef] = useState(false);
   const [moodboardImages, setMoodboardImages] = useState([]);
   const [showMoodboard, setShowMoodboard] = useState(false);
-
-  const handleSpaceClick = useCallback((space) => {
-    setAngleModalSpace(space);
-  }, []);
-
-  const handleAngleSelect = useCallback((space, angle) => {
-    setFilters((prev) => ({ ...prev, space: space.name }));
-    setSelectedAngle({ space: space.name, angle: angle.label, image: angle.image });
-    setAngleModalSpace(null);
-  }, []);
 
   const handleTemplateRefSelect = useCallback((template) => {
     setReferenceImage({
@@ -52,7 +39,7 @@ export default function StudioPage() {
         id: crypto.randomUUID(),
         image_data: imageData,
         prompt: prompt,
-        filters: { function_type: filters.function_type, space: filters.space },
+        filters: { function_type: filters.function_type },
         created_at: new Date().toISOString(),
       },
     ]);
@@ -64,15 +51,17 @@ export default function StudioPage() {
 
   return (
     <div className="relative h-screen w-screen overflow-hidden text-white" data-testid="studio-page">
-      {/* Background with heavy blur */}
-      <div
-        className="fixed inset-0 z-0"
-        style={{
-          backgroundImage: `url(${BG_IMAGE})`,
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-        }}
-      >
+      {/* Fixed Background Video with heavy blur */}
+      <div className="fixed inset-0 z-0 overflow-hidden">
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          className="absolute min-w-full min-h-full object-cover"
+        >
+          <source src="/Assets/background_video.mp4" type="video/mp4" />
+        </video>
         <div
           className="absolute inset-0"
           style={{
@@ -157,7 +146,8 @@ export default function StudioPage() {
             setFilters={setFilters}
             referenceImage={referenceImage}
             setReferenceImage={setReferenceImage}
-            onSpaceClick={handleSpaceClick}
+            venueImage={venueImage}
+            setVenueImage={setVenueImage}
             onHoverItem={setHoveredItem}
             onOpenTemplateRef={() => setShowTemplateRef(true)}
           />
@@ -168,23 +158,13 @@ export default function StudioPage() {
           <Canvas
             filters={filters}
             referenceImage={referenceImage}
-            venueImage={selectedAngle?.image || null}
+            venueImage={venueImage}
             sessionId={sessionId}
-            selectedAngle={selectedAngle}
             onAddToMoodboard={handleAddToMoodboard}
             moodboardCount={moodboardImages.length}
           />
         </div>
       </div>
-
-      {/* Angle Selection Modal */}
-      {angleModalSpace && (
-        <AngleModal
-          space={angleModalSpace}
-          onSelect={handleAngleSelect}
-          onClose={() => setAngleModalSpace(null)}
-        />
-      )}
 
       {/* Template Reference Modal */}
       {showTemplateRef && (

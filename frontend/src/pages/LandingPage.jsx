@@ -10,17 +10,18 @@ export default function LandingPage() {
 
   return (
     <div className="relative min-h-screen text-white" data-testid="landing-page">
-      {/* Fixed Background */}
-      <div
-        className="fixed inset-0 z-0"
-        style={{
-          backgroundImage: `url(${BG_IMAGE})`,
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-          backgroundRepeat: "no-repeat",
-        }}
-      >
-        <div className="absolute inset-0 bg-black/35" />
+      {/* Fixed Background Video */}
+      <div className="fixed inset-0 z-0 overflow-hidden">
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          className="absolute min-w-full min-h-full object-cover"
+        >
+          <source src="/Assets/background_video.mp4" type="video/mp4" />
+        </video>
+        <div className="absolute inset-0 bg-black/45" />
       </div>
 
       {/* Content */}
@@ -29,26 +30,13 @@ export default function LandingPage() {
         <section className="min-h-screen flex flex-col items-center justify-center px-6">
           <div className="opacity-0 animate-fade-in-up" style={{ animationDelay: "0.1s", animationFillMode: "forwards" }}>
             <div
-              className="flex items-center justify-center gap-5 md:gap-8 mb-10"
+              className="flex items-center justify-center gap-5 md:gap-8 mb-8"
               data-testid="hero-headline"
             >
               <img
-                src={FAIRMONT_LOGO}
-                alt="Fairmont"
-                className="h-14 sm:h-16 md:h-20 lg:h-24 w-auto max-w-[200px] md:max-w-[280px] brightness-0 invert drop-shadow-[0_0_12px_rgba(255,255,255,0.2)]"
-                style={{ objectFit: "contain" }}
-                data-testid="fairmont-logo"
-              />
-              <span
-                className="text-3xl sm:text-4xl md:text-5xl text-white/50"
-                style={{ fontFamily: "var(--font-heading)", fontWeight: 300 }}
-              >
-                X
-              </span>
-              <img
                 src={LOVERSAI_LOGO}
                 alt="LoversAI"
-                className="h-14 sm:h-16 md:h-20 lg:h-24 w-auto max-w-[200px] md:max-w-[280px] brightness-0 invert drop-shadow-[0_0_12px_rgba(255,255,255,0.2)]"
+                className="h-28 sm:h-36 md:h-44 lg:h-52 w-auto max-w-[320px] md:max-w-[480px] brightness-0 invert drop-shadow-[0_0_16px_rgba(255,255,255,0.25)]"
                 style={{ objectFit: "contain" }}
                 data-testid="loversai-logo"
               />
@@ -131,12 +119,12 @@ export default function LandingPage() {
         >
           <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
             <div className="flex items-center gap-3">
-              <img src={FAIRMONT_LOGO} alt="Fairmont" className="h-6 brightness-0 invert opacity-60" />
+              <img src={LOVERSAI_LOGO} alt="LoversAI" className="h-6 brightness-0 invert opacity-60" />
               <span
                 className="text-white/60 text-sm"
                 style={{ fontFamily: "var(--font-heading)" }}
               >
-                x LoversAI
+                LoversAI
               </span>
             </div>
 

@@ -270,8 +270,21 @@ async def fetch_image_as_base64(url: str) -> Optional[str]:
 def build_prompt(req: GenerateRequest) -> str:
     base_prompt = (req.prompt or "").strip()
     parts = [f"Client request: {base_prompt}" if base_prompt else "Client request: design the venue decor."]
+    
+    event_prompts = {
+        "Ultra-Luxury Wedding": "Aesthetic style: Opulent ultra-luxury wedding design. Rich, dense floral arrangements using cream roses, pastel hydrangeas, crystal hanging chandeliers, ambient warm candle uplighting, luxury seating with gold accents, grand tablescapes with fine silverware, fairy-tale atmospheric romantic look.",
+        "Small Function": "Aesthetic style: Intimate small function design suitable for birthday parties, success celebrations, or private gatherings. Festive balloon arches, warm fairy lights, colorful and elegant banners, cozy lounge seating, modern geometric backdrops, warm and cheerful ambient lighting, welcoming and elegant atmosphere.",
+        "Corporate Conference": "Aesthetic style: Professional high-end corporate conference design. Clean geometric stage, neat rows of professional seating, modern LED presentation panels, sleek linear ceiling lighting, minimalist business branding banners, neat white floral accents, sophisticated corporate look.",
+        "Global Exhibition": "Aesthetic style: Modern international exhibition hall. Premium display booths, high-tech spotlight tracks, sleek industrial display stands, clean geometric partitions, brand banners, polished minimal design, bright daylight studio lighting.",
+        "Fashion Show": "Aesthetic style: High-fashion runway catwalk design. Sleek raised runway platform, dramatic overhead theatrical spotlights, sharp directional key lighting, dark textured backdrop panels, front-row premium seating, high-contrast dramatic shadows.",
+        "Product Launch": "Aesthetic style: Premium product launch stage design. Elegant display pedestal at the focal point, dramatic backlighting, clean sophisticated backdrop panel, sleek modern presentation lounge furniture, professional branding presentation layout.",
+        "Cultural Festival": "Aesthetic style: Vibrant festive cultural celebration. Ornate traditional drapery, rich ethnic patterns, dense marigold and orchid floral garlands, hanging brass lamps, traditional lanterns, colorful and celebratory warm ambient lighting."
+    }
+
     if req.function_type:
         parts.append(f"Event type: {req.function_type}")
+        if req.function_type in event_prompts:
+            parts.append(event_prompts[req.function_type])
     if req.theme:
         parts.append(f"Theme: {req.theme}")
     if req.space:
@@ -298,6 +311,9 @@ def build_flux_prompt(user_prompt: str, mode: str) -> str:
 Input semantics:
 - Image 1 is the real venue to preserve.
 - Image 2 is the style reference to transfer.
+
+CRITICAL OVERLAY REQUIREMENT:
+The venue space is exactly provided in Image 1. You must keep every single structural pixel, wall, ceiling, window, door, light fixture, pillar, floor pattern, and camera perspective 100% identical and unchanged. ONLY add/overlay the decor elements (such as tables, chairs, drapery, flowers, table settings) in the empty spaces or overlaying the tables. Do not alter the background or structure of the venue in any way.
 
 Generation requirements:
 - Keep venue architecture, perspective, lens feel, and room proportions intact.

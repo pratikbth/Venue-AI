@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react";
 
 const BG_IMAGE = "https://customer-assets.emergentagent.com/job_luxe-design-studio-2/artifacts/prqxmpyt_b354_ho_00_p_1024x768.jpg";
 const FAIRMONT_LOGO = "https://customer-assets.emergentagent.com/job_luxe-design-studio-2/artifacts/vull8s52_msa_l_0000681-1.svg";
+const LOVERSAI_LOGO = "https://customer-assets.emergentagent.com/job_luxe-design-studio-2/artifacts/pzzxqiqb_Gemini_Generated_Image_vf8wwvvf8wwvvf8w-removebg-preview.png";
 const ASSET = "https://customer-assets.emergentagent.com/job_luxe-design-studio-2/artifacts";
 
 const CONCIERGE_SECTIONS = [
@@ -49,16 +50,17 @@ export default function ConciergePage() {
 
   return (
     <div className="relative min-h-screen text-white" data-testid="concierge-page">
-      {/* Fixed Background */}
-      <div
-        className="fixed inset-0 z-0"
-        style={{
-          backgroundImage: `url(${BG_IMAGE})`,
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-          backgroundRepeat: "no-repeat",
-        }}
-      >
+      {/* Fixed Background Video */}
+      <div className="fixed inset-0 z-0 overflow-hidden">
+        <video
+          autoPlay
+          loop
+          muted
+          playsInline
+          className="absolute min-w-full min-h-full object-cover"
+        >
+          <source src="/Assets/background_video.mp4" type="video/mp4" />
+        </video>
         <div
           className="absolute inset-0"
           style={{
@@ -85,8 +87,8 @@ export default function ConciergePage() {
 
           <div className="flex items-center gap-3">
             <img
-              src={FAIRMONT_LOGO}
-              alt="Fairmont"
+              src={LOVERSAI_LOGO}
+              alt="LoversAI"
               className="h-7 brightness-0 invert opacity-70"
               style={{ objectFit: "contain" }}
             />
@@ -181,7 +183,7 @@ export default function ConciergePage() {
             className="text-white/25 text-xs tracking-widest uppercase"
             style={{ fontFamily: "var(--font-body)" }}
           >
-            Fairmont Gold · The Art of Luxury
+            LoversAI Gold · The Art of Luxury
           </p>
         </div>
       </div>
